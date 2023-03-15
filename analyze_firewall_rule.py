@@ -106,7 +106,6 @@ def to_dict(rel_dict):
 def main():
     # 读取命令行参数
     len1 = len(sys.argv)
-    print(len1)
     if len(sys.argv) > 2:
         out_file_name = sys.argv[2].split('.')[0] + ".csv"
     elif len(sys.argv) > 1:
@@ -114,10 +113,11 @@ def main():
             reader = list(csv.reader(csvfile))[1:]  # 读取包含策略的csv文件，但删除标题
     else:
         print(f"Usage: python3 {os.path.basename(__file__)} <file>")
-        print("Input file name is required. If it is not provided, the default value is used here")
-        rules_file = StringIO(EXAMPE_RULES)
-        reader = pd.read_csv(rules_file).values.tolist()  # # Create a DataFrame from a csv file
-        # sys.exit("Input file name is required!")
+        sys.exit("Input file name is required!")
+
+        # print("Input file name is required. If it is not provided, the default value is used here")
+        # rules_file = StringIO(EXAMPE_RULES)
+        # reader = pd.read_csv(rules_file).values.tolist()  # # Create a DataFrame from a csv file
 
     policies = [Policy(*r) for r in reader]
     policies_st(policies)

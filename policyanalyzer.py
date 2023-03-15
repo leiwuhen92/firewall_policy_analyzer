@@ -1,31 +1,11 @@
-# -*- coding: utf-8 -*-
-
-"""
-Copyright 2021-2022 Maen Artimy
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
-
 import ipaddress
 from definitions import RRule, RField, Anomaly
+from logger import logger
 
-
-class Port():
+class Port(object):
     """
     A TCP/UDP Port
     """
-
     def __init__(self, port):
         # Do not use this construtor directly, use get_port() instead
         self.port = port
@@ -49,11 +29,10 @@ class Port():
         return cls(int(port))
 
 
-class Protocol():
+class Protocol(object):
     """
     A Protcol
     """
-
     _protocols = ["IP", "ICMP", "TCP", "UDP"]
 
     def __init__(self, protocol):
@@ -79,11 +58,10 @@ class Protocol():
         return cls(protocol)
 
 
-class Address():
+class Address(object):
     """
     An IPv4 Address
     """
-
     @classmethod
     def get_address(cls, address):
         if address == 'any':
@@ -95,13 +73,13 @@ def compare_fields(a, b):
     """
     get relation between two policy fields
     """
-    relation = RField.UNEQUAL
+    relation = RField.UNEQUAL    # 0
     if a == b:
-        relation = RField.EQUAL
+        relation = RField.EQUAL  # 1
     elif a.subset_of(b):
-        relation = RField.SUBSET
+        relation = RField.SUBSET # 2
     elif a.superset_of(b):
-        relation = RField.SUPERSET
+        relation = RField.SUPERSET  # 3
     return relation
 
 
@@ -120,7 +98,7 @@ def compare_addresses(a, b):
     return relation
 
 
-class Packet():
+class Packet(object):
     """
     Packet header information
     """
@@ -131,7 +109,7 @@ class Packet():
             'src': Address.get_address(src.strip()),
             'sport': Port.get_port(s_port.strip()),
             'dst': Address.get_address(dst.strip()),
-            'dport': Port.get_port(d_port),
+            'dport': Port.get_port(d_port.strip()),
         }
 
     def __repr__(self):
@@ -170,67 +148,74 @@ class Policy(Packet):
         fields = self.compare_fields(other)
         relation = None
         if all(f is RField.UNEQUAL for f in fields):
-            relation = RRule.CD
+            relation = RRule.CD    # 完全不相交
         elif all(f is RField.EQUAL for f in fields):
-            relation = RRule.EM
+            relation = RRule.EM    # 完全匹配
         elif all(f in [RField.SUPERSET, RField.EQUAL] for f in fields):
-            relation = RRule.IMP
+            relation = RRule.IMP   # 包含匹配（超集）
         elif all(f in [RField.SUBSET, RField.EQUAL] for f in fields):
-            relation = RRule.IMB
-        elif any(f is RField.UNEQUAL for f in fields) \
-                and any(f is not RField.UNEQUAL for f in fields):
-            relation = RRule.PD
+            relation = RRule.IMB   # 包含匹配（子集）
+        elif any(f is RField.UNEQUAL for f in fields) and any(f is not RField.UNEQUAL for f in fields):
+            relation = RRule.PD    # 部分不相交
         else:
-            relation = RRule.CC
+            relation = RRule.CC    # 相关
         return relation
 
     def is_match(self, packet):
         # the packet matches this policy if all fields in policy are
         # equal or supersets of the packet fields
-        return all(f in [RField.SUPERSET, RField.EQUAL]
-                   for f in self.compare_fields(packet))
+        return all(f in [RField.SUPERSET, RField.EQUAL] for f in self.compare_fields(packet))
 
     def __repr__(self):
         return ','.join(map(str, self.fields.values())) + ',' + self.action
 
 
-class PolicyAnalyzer():
+class PolicyAnalyzer(object):
     """
     Firewall Policy Analyzer
     """
 
-    anamoly = {
-        (RRule.IMB, False): Anomaly.GEN,
-        (RRule.IMP, False): Anomaly.SHD,
-        (RRule.CC, False): Anomaly.COR,
-        (RRule.IMP, True): Anomaly.RYD,
-        (RRule.EM, True): Anomaly.RYD,
-        (RRule.IMB, True): Anomaly.RXD
+    anamoly = {   # 异常，格式：(rule_relation, same_action): 异常分类
+        (RRule.IMB, False): Anomaly.GEN,   # IMB 包含匹配（子集）,  GEN generalization
+        (RRule.IMP, False): Anomaly.SHD,   # IMP 包含匹配（超集）,  SHD shadowing
+        (RRule.CC, False): Anomaly.COR,    # CC 相关, COR corrolation
+        (RRule.IMP, True): Anomaly.RYD,    # IMP 包含匹配（超集）, RYD redundancy: x is a superset of y
+        (RRule.EM, True): Anomaly.RYD,     # EM  完全匹配, RYD redundancy: x is a superset of y
+        (RRule.IMB, True): Anomaly.RXD     # IMP 包含匹配（超集）, RXD  redundancy: x is a supset of y
     }
 
     def __init__(self, policies):
         self.policies = policies
 
     def _get_anamoly(self, rule_relation, same_action):
+        # func: 根据rule_relation与action确定异常类型
         return self.anamoly.get((rule_relation, same_action), Anomaly.AOK)
 
     def get_relations(self):
-        # compare each policy with the previous ones
+        # func: compare each policy with the previous ones
+        # return: like {0: [], 1: [(0, IMB)], 2: [(0, CC), (1, CC)], 3: [(0, CC), (1, IMP), (2, IMP)]}
         rule_relations = {}
         for y, y_policy in enumerate(self.policies):
             rule_relations[y] = [(x, x_policy.get_rule_relation(y_policy))
                                  for x, x_policy in enumerate(self.policies[0:y])]
+
+        logger.info("rule_relations:%s" % rule_relations)
         return rule_relations
 
     def get_a_relations(self):
-        # compare each policy action with the previous ones
+        # func: compare each policy's action with the previous ones
+        # return: {0: [], 1: [False], 2: [False, True], 3: [True, False, False]}
         rule_a_relations = {}
         for y, y_policy in enumerate(self.policies):
             rule_a_relations[y] = [x_policy.compare_actions(y_policy)
                                    for x_policy in self.policies[0:y]]
+
+        logger.info("rule_a_relations:%s" % rule_a_relations)
         return rule_a_relations
 
     def get_anomalies(self):
+        # func: 获取异常
+        # return: {1: [(0, GEN)], 2: [(0, COR)], 3: [(1, SHD), (2, SHD)]}
         anomalies = {}
         rule_relations = self.get_relations()
         a_relations = self.get_a_relations()
@@ -241,17 +226,17 @@ class PolicyAnalyzer():
                 if anamoly is Anomaly.RXD:
                     # check the rules in between for additional conditions
                     for rz in range(rx+1, ry):
-                        if any(a == rx and not a_relations[rz][rx]
-                               and b in [RRule.CC, RRule.IMB]
+                        if any(a == rx and not a_relations[rz][rx] and b in [RRule.CC, RRule.IMB]
                                    for a, b in rule_relations[rz]):
                             anamoly = Anomaly.AOK
                             break
-                if anamoly is not Anomaly.AOK:
+                if anamoly is not Anomaly.AOK:  # 只捕获异常
                     anomalies.setdefault(ry, []).append((rx, anamoly))
+
+        logger.info("anomalies:%s" % anomalies)
         return anomalies
 
     def get_first_match(self, packet):
-
         for i, policy in enumerate(self.policies):
             if policy.is_match(packet):
                 return i, policy
